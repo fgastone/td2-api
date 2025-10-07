@@ -1,0 +1,8 @@
+# Arquivos sensíveis
+.env
+.env.local
+serviceAccountKey.json
+
+# Dependências e build
+node_modules/
+
