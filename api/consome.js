@@ -13,8 +13,6 @@ dotenv.config();
 //  databaseURL: "https://diamondstd2-default-rtdb.firebaseio.com"
 //});
 
-import admin from "firebase-admin";
-
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
