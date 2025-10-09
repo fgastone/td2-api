@@ -50,7 +50,7 @@ app.post("/api/hotmart-webhook", async (req, res) => {
     const event = payload.event || payload.type;
 
     // Processa apenas compra COMPLETA
-    if (event !== "purchase.completed" && event !== "PURCHASE_COMPLETED") {
+    if (event.toLowerCase() !== "purchase_complete") {
       console.log("Evento ignorado (não é compra completa):", event);
       return res.status(200).send("evento ignorado");
     }
@@ -136,3 +136,4 @@ app.post("/api/hotmart-webhook", async (req, res) => {
 
 export default app;
 export const config = { api: { bodyParser: true } };
+
