@@ -28,7 +28,7 @@ if (!admin.apps.length) {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-// Função para gerar userId aleatório
+// Função para gerar userId aleatório tipo diam-xxxx-xxxx-xxxx
 const gerarUserId = () => {
   const parte = () => Math.random().toString(36).substring(2, 6);
   return `diam-${parte()}-${parte()}-${parte()}`;
@@ -37,28 +37,25 @@ const gerarUserId = () => {
 app.post("/api/hotmart-webhook", async (req, res) => {
   try {
     const payload = req.body || {};
-    const hottok = req.headers["x-hotmart-hottok"] || payload.token || payload.hottok;
+    const hottok = req.headers["x-hotmart-hottok"]; // token enviado no header
 
-    // ⚠️ valida token do Hotmart
+    // valida token do Hotmart
     if (process.env.HOTMART_HOTTOK && hottok !== process.env.HOTMART_HOTTOK) {
       console.warn("Hotmart token mismatch", hottok);
       return res.status(403).send("forbidden");
     }
 
+    // 🔹 Confirma que o evento é compra completa e status COMPLETED
     const event = payload.event;
-    
-    // Processa apenas compra COMPLETA
-    if (event?.toLowerCase() !== "purchase_complete") {
+    const status = payload?.data?.purchase?.status;
+    if (event !== "PURCHASE_COMPLETE" || status !== "COMPLETED") {
       console.log("Evento ignorado (não é compra completa):", event);
       return res.status(200).send("evento ignorado");
     }
 
-    // Extrair dados essenciais
-    const purchase = payload?.data?.purchase || {};
-    const buyer = purchase?.buyer || {};
-
-    const transactionId = purchase?.id || purchase?.transactionId || payload?.id;
-    const email = buyer?.email || payload?.email;
+    // Extrai transactionId e email do comprador
+    const transactionId = payload?.data?.purchase?.transaction;
+    const email = payload?.data?.buyer?.email;
 
     if (!transactionId || !email) {
       console.error("Payload sem transactionId ou email", { transactionId, email, payload });
@@ -98,15 +95,15 @@ app.post("/api/hotmart-webhook", async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    // Atualização atômica no Firebase
+    // Atualização atômica
     const updates = {};
     updates[`usuarios/${userId}`] = novoUsuario;
     updates[`hotmart_tx/${transactionId}`] = {
       userId,
       email,
-      produto: purchase?.product?.name || null,
-      valor: purchase?.payment?.value || null,
-      moeda: purchase?.payment?.currency || null,
+      produto: payload?.data?.product?.name || null,
+      valor: payload?.data?.purchase?.price?.value || null,
+      moeda: payload?.data?.purchase?.price?.currency_value || null,
       createdAt: new Date().toISOString()
     };
 
@@ -130,7 +127,6 @@ app.post("/api/hotmart-webhook", async (req, res) => {
 
     console.log("Hotmart webhook processed:", transactionId, userId);
     return res.status(200).send("ok");
-
   } catch (err) {
     console.error("Erro no webhook Hotmart:", err);
     return res.status(500).send("internal error");
