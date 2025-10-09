@@ -2,6 +2,7 @@
 import express from "express";
 import admin from "firebase-admin";
 import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 // import sgMail from "@sendgrid/mail"; // ⚠️ Opcional, comentado
 
 dotenv.config();
@@ -28,16 +29,26 @@ if (!admin.apps.length) {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-// Função para gerar userId aleatório tipo diam-xxxx-xxxx-xxxx
 const gerarUserId = () => {
   const parte = () => Math.random().toString(36).substring(2, 6);
   return `diam-${parte()}-${parte()}-${parte()}`;
 };
 
+// Configuração do SMTP do Google Workspace
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // true se usar 465
+  auth: {
+    user: process.env.WORKSPACE_EMAIL,
+    pass: process.env.WORKSPACE_APP_PASSWORD,
+  },
+});
+
 app.post("/api/hotmart-webhook", async (req, res) => {
   try {
     const payload = req.body || {};
-    const hottok = req.headers["x-hotmart-hottok"]; // token enviado no header
+    const hottok = payload.hottok || payload.token || req.headers["x-hotmart-hottok"];
 
     // valida token do Hotmart
     if (process.env.HOTMART_HOTTOK && hottok !== process.env.HOTMART_HOTTOK) {
@@ -45,17 +56,17 @@ app.post("/api/hotmart-webhook", async (req, res) => {
       return res.status(403).send("forbidden");
     }
 
-    // 🔹 Confirma que o evento é compra completa e status COMPLETED
-    const event = payload.event;
-    const status = payload?.data?.purchase?.status;
-    if (event !== "PURCHASE_COMPLETE" || status !== "COMPLETED") {
+    const event = payload.event || payload.type;
+
+    // Processa apenas compra COMPLETA
+    if (event !== "PURCHASE_COMPLETE") {
       console.log("Evento ignorado (não é compra completa):", event);
       return res.status(200).send("evento ignorado");
     }
 
-    // Extrai transactionId e email do comprador
-    const transactionId = payload?.data?.purchase?.transaction;
-    const email = payload?.data?.buyer?.email;
+    // Extrair dados essenciais
+    const transactionId = payload?.data?.purchase?.transaction || payload?.transactionId || payload.id;
+    const email = payload?.data?.buyer?.email || payload?.data?.purchase?.buyer?.email || payload?.email;
 
     if (!transactionId || !email) {
       console.error("Payload sem transactionId ou email", { transactionId, email, payload });
@@ -90,7 +101,6 @@ app.post("/api/hotmart-webhook", async (req, res) => {
       ativo: true,
       ciclos: 800,
       ultimoUso: null,
-      origem: "Hotmart",
       email,
       createdAt: new Date().toISOString()
     };
@@ -109,24 +119,22 @@ app.post("/api/hotmart-webhook", async (req, res) => {
 
     await db.ref().update(updates);
 
-    // ⚠️ Envio de e-mail comentado
-    /*
-    const msg = {
-      to: email,
-      from: process.env.EMAIL_FROM,
-      subject: "Sua chave Diamantes — Obrigado pela compra",
-      text: `Obrigado! Sua chave de acesso: ${userId}\nCiclos recebidos: 800\nAcesse o painel para usar.`,
-      html: `<p>Obrigado pela compra! Sua chave de acesso: <b>${userId}</b></p><p>Ciclos: <b>800</b></p>`
-    };
+    // Envio de e-mail via Google Workspace SMTP
     try {
-      await sgMail.send(msg);
+      await transporter.sendMail({
+        from: `"Minha Plataforma" <${process.env.WORKSPACE_EMAIL}>`,
+        to: email,
+        subject: "Sua chave Diamantes — Obrigado pela compra",
+        text: `Obrigado! Sua chave de acesso: ${userId}\nCiclos recebidos: 800\nAcesse o painel para usar.`,
+        html: `<p>Obrigado pela compra! Sua chave de acesso: <b>${userId}</b></p><p>Ciclos: <b>800</b></p>`
+      });
+      console.log("✅ E-mail enviado para:", email);
     } catch (mailErr) {
       console.error("Erro ao enviar e-mail:", mailErr);
     }
-    */
 
     console.log("Hotmart webhook processed:", transactionId, userId);
-    return res.status(200).send("ok");
+    return res.status(200).send({ transactionId, userId });
   } catch (err) {
     console.error("Erro no webhook Hotmart:", err);
     return res.status(500).send("internal error");
